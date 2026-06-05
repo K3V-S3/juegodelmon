@@ -133,6 +133,27 @@
     .vote-opt p  { font-size: .78rem; color: var(--gray); }
     .vote-opt.cumplir    { border-color: rgba(46,204,113,.4);  background: rgba(46,204,113,.08);  }
     .vote-opt.traicionar { border-color: rgba(255,107,74,.4);  background: rgba(255,107,74,.08);  }
+
+    /* ── CHAT BOT & EXTRAS ──────────────────────────────────────────── */
+    .chat-tab-bot { flex:1; padding:10px 8px; font-size:.78rem; font-weight:700; text-align:center; cursor:pointer; color:var(--gray); border-bottom:2px solid transparent; transition:all .2s; }
+    .chat-tab-bot.active { color:var(--gold); border-bottom-color:var(--gold); }
+    .chat-locked-banner { background:rgba(231,76,60,.1); border:1px solid rgba(231,76,60,.3); color:var(--coral); font-size:.82rem; font-weight:600; text-align:center; padding:10px; flex-shrink:0; }
+    .bot-msgs { flex:1; padding:14px 16px; overflow-y:auto; display:flex; flex-direction:column; gap:10px; }
+    .bot-bubble-wrap { display:flex; flex-direction:column; max-width:90%; }
+    .bot-bubble-wrap.user-side { align-self:flex-end; align-items:flex-end; }
+    .bot-bubble-wrap.bot-side  { align-self:flex-start; }
+    .bot-bubble { padding:10px 14px; border-radius:16px; font-size:.85rem; line-height:1.5; }
+    .bot-bubble-wrap.user-side .bot-bubble { background:rgba(11,212,184,.18); border:1px solid rgba(11,212,184,.3); border-bottom-right-radius:4px; }
+    .bot-bubble-wrap.bot-side  .bot-bubble { background:rgba(244,196,48,.08); border:1px solid rgba(244,196,48,.2); color:var(--white); border-bottom-left-radius:4px; }
+    .bot-meta { font-size:.68rem; color:var(--gray); margin-bottom:3px; }
+    .bot-thinking { display:flex; gap:5px; align-items:center; padding:8px 0; }
+    .bot-dot { width:8px; height:8px; border-radius:50%; background:var(--gold); animation:pulse 1.2s infinite; }
+    .bot-dot:nth-child(2) { animation-delay:.2s; }
+    .bot-dot:nth-child(3) { animation-delay:.4s; }
+    .inst-chat-controls { display:flex; gap:8px; flex-wrap:wrap; padding:8px 16px; background:rgba(0,0,0,.15); border-bottom:1px solid rgba(255,255,255,.06); flex-shrink:0; }
+    .chat-status-badge { font-size:.72rem; font-weight:700; padding:3px 10px; border-radius:50px; }
+    .chat-status-badge.open   { background:rgba(46,204,113,.2);  color:var(--green); }
+    .chat-status-badge.closed { background:rgba(231,76,60,.2);   color:var(--coral); }
     .deal-card { background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08); border-radius: 10px; padding: 10px 12px; font-size: .8rem; display: flex; flex-direction: column; gap: 5px; }
     .deal-status { display: inline-block; padding: 2px 9px; border-radius: 50px; font-size: .68rem; font-weight: 700; }
     .deal-status.pending    { background: rgba(244,196,48,.2);  color: var(--gold);  }
@@ -457,6 +478,7 @@
   </div>
   <div class="inst-actions">
     <button class="btn btn-gold btn-sm" onclick="goToChat()">💬 Chat</button>
+    <button id="btn-inst-toggle-chat" class="btn btn-sm btn-o" onclick="toggleChat()" style="font-size:.72rem">🔒 Cerrar Chat</button>
     <button class="btn btn-o btn-sm"    onclick="openModalEditRes()">📦 Recursos</button>
     <button class="btn btn-p btn-sm"    onclick="instructorStartRound()">🔄 Siguiente Ronda</button>
     <button class="btn btn-danger btn-sm" onclick="confirmReset()">↩ Reiniciar</button>
@@ -530,18 +552,54 @@
   <div class="chat-wrap">
     <div class="chat-hdr">
       <button class="btn btn-o btn-sm" onclick="goBackFromChat()">← Volver</button>
-      <div class="chat-hdr-title">💬 Chat del Simulador</div>
+      <div class="chat-hdr-title">💬 Chat</div>
+      <span id="chat-status-badge" class="chat-status-badge open">Abierto</span>
       <div id="chat-badge" style="font-size:.72rem;background:rgba(255,255,255,.1);padding:4px 10px;border-radius:50px"></div>
+    </div>
+    <!-- Controles del instructor (solo visibles para él) -->
+    <div id="inst-chat-controls" class="inst-chat-controls" style="display:none">
+      <button id="btn-toggle-chat" class="btn btn-sm btn-o" onclick="toggleChat()">🔒 Cerrar Chat</button>
+      <button class="btn btn-sm btn-danger" onclick="confirmClearChat()">🗑️ Borrar mensajes</button>
+    </div>
+    <!-- Banner cuando el chat está cerrado -->
+    <div id="chat-locked-banner" class="chat-locked-banner" style="display:none">
+      🔒 El instructor ha cerrado el chat temporalmente
     </div>
     <div class="chat-tabs">
       <div class="chat-tab active" id="tab-general" onclick="setChatTab('general')">🌐 General</div>
       <div class="chat-tab" id="tab-tribe" onclick="setChatTab('tribe')">🏕️ Mi Tribu</div>
+      <div class="chat-tab-bot" id="tab-bot" onclick="setChatTab('bot')">🤖 Estratega</div>
     </div>
+    <!-- Tab general/tribu -->
     <div class="chat-msgs" id="chat-msgs"></div>
-    <div class="chat-input-row">
+    <!-- Tab bot -->
+    <div class="bot-msgs" id="bot-msgs" style="display:none"></div>
+    <!-- Input normal -->
+    <div class="chat-input-row" id="chat-input-row">
       <input type="text" class="chat-inp" id="chat-input" placeholder="Escribe un mensaje…"
              onkeydown="if(event.key==='Enter')sendChatMsg()" maxlength="200" autocomplete="off">
       <button class="chat-send" onclick="sendChatMsg()">➤</button>
+    </div>
+    <!-- Input bot -->
+    <div class="chat-input-row" id="bot-input-row" style="display:none">
+      <input type="text" class="chat-inp" id="bot-input" placeholder="Pregunta al Estratega IA…"
+             onkeydown="if(event.key==='Enter')sendBotMsg()" maxlength="300" autocomplete="off">
+      <button class="chat-send" style="background:var(--gold);color:var(--ocean)" onclick="sendBotMsg()">➤</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL — CONFIRMAR BORRAR CHAT -->
+<div class="modal" id="modal-clear-chat">
+  <div class="modal-box">
+    <button class="modal-close" onclick="closeModal('modal-clear-chat')">✕</button>
+    <div class="modal-title">🗑️ ¿Borrar todos los mensajes?</div>
+    <p style="color:var(--gray);font-size:.88rem;line-height:1.5;margin-bottom:20px">
+      Esto borrará permanentemente todos los mensajes del chat general y de tribu.
+    </p>
+    <div style="display:flex;gap:10px">
+      <button class="btn btn-o btn-full" onclick="closeModal('modal-clear-chat')">Cancelar</button>
+      <button class="btn btn-danger btn-full" onclick="doClearChat()">Sí, borrar todo</button>
     </div>
   </div>
 </div>
@@ -728,7 +786,8 @@ function freshState() {
     })),
     players: [],           // [{ name, tribeId }]
     deals:   [],           // [{ id, fromId, toId, giveW,giveF,giveM, recvW,recvF,recvM, round, status }]
-    chat:    []            // [{ id, author, tribeId, tab, text, ts, system }]
+    chat:    [],           // [{ id, author, tribeId, tab, text, ts, system }]
+    chatOpen: true          // instructor puede cerrar/abrir el chat
   };
 }
 
@@ -764,8 +823,11 @@ function _attachListener(code) {
     if (!data) return;
     DB = data;
     renderAll();
-    if (data.phase === 'playing' && session.role !== 'instructor') autoNavigate(data);
-    if (data.phase === 'final') goTo('s-final');
+    // Solo navegar automáticamente si NO estamos en el chat
+    if (!isActive('s-chat')) {
+      if (data.phase === 'playing' && session.role !== 'instructor') autoNavigate(data);
+      if (data.phase === 'final') goTo('s-final');
+    }
   });
 }
 
@@ -1334,18 +1396,117 @@ function renderAll() {
   renderInstructor(d);
   renderTribeView(d);
   renderFinal(d);
+  // Renderizar chat si está abierto (sin cambiar de pantalla)
+  if (isActive('s-chat')) {
+    if (chatTab === 'bot') renderBotMsgs();
+    else renderChatMsgs();
+    renderChatLockUI();
+  }
   if (d.timerRunning && !timerInterval) startTimer();
 }
 
 /* ──────────────────────────────────────────────────────────
-   CHAT
+   CHAT — FILTRO DE GROSERÍAS
+────────────────────────────────────────────────────────── */
+const BANNED_WORDS = [
+  // Español
+  'puta','puto','mierda','coño','joder','hostia','cabrón','cabron',
+  'hijueputa','hijueputo','malparido','malparida','gonorrea','marica',
+  'maricón','maricon','verga','culo','pendejo','pendeja','idiota',
+  'estúpido','estupido','imbécil','imbecil','hdp','ptm','wtf',
+  'culero','chinga','chingada','pinche','mamón','mamon','güey','wey',
+  'cagada','carajo','hijo de puta','perra','perro','bastardo',
+  // English (básico)
+  'fuck','shit','bitch','asshole','damn','crap','ass','dick','cock',
+  'pussy','bastard','motherfucker','faggot','retard','nigga','nigger'
+];
+
+function filterProfanity(text) {
+  let filtered = text;
+  BANNED_WORDS.forEach(word => {
+    try {
+      // Escapar todos los caracteres especiales de regex de forma segura
+      const escaped = word.split('').map(ch => {
+        return '-[]{}/\\^$.|?*+()'.includes(ch) ? '\\' + ch : ch;
+      }).join('');
+      const regex = new RegExp(escaped, 'gi');
+      filtered = filtered.replace(regex, match => '*'.repeat(match.length));
+    } catch(e) {
+      // Fallback: búsqueda simple sin regex
+      const lower = filtered.toLowerCase();
+      const wl    = word.toLowerCase();
+      let idx = lower.indexOf(wl);
+      while (idx !== -1) {
+        filtered = filtered.slice(0, idx) + '*'.repeat(word.length) + filtered.slice(idx + word.length);
+        idx = filtered.toLowerCase().indexOf(wl, idx + word.length);
+      }
+    }
+  });
+  return filtered;
+}
+
+/* ──────────────────────────────────────────────────────────
+   CHAT — CONTROL DE ACCESO (instructor abre/cierra)
+────────────────────────────────────────────────────────── */
+function toggleChat() {
+  const isOpen = DB.chatOpen !== false;
+  updateDB(d => { d.chatOpen = !isOpen; });
+  const msg = isOpen ? '🔒 El instructor cerró el chat' : '🔓 El instructor abrió el chat';
+  postSystemMsg(msg);
+  showToast(isOpen ? '🔒 Chat cerrado' : '🔓 Chat abierto', isOpen ? 'warning' : 'success');
+}
+
+function confirmClearChat() { openModal('modal-clear-chat'); }
+
+function doClearChat() {
+  updateDB(d => { d.chat = []; });
+  closeModal('modal-clear-chat');
+  showToast('🗑️ Chat borrado', 'info');
+  renderChatMsgs();
+}
+
+function renderChatLockUI() {
+  const isOpen   = DB.chatOpen !== false;
+  const banner   = document.getElementById('chat-locked-banner');
+  const inputRow = document.getElementById('chat-input-row');
+  const badge    = document.getElementById('chat-status-badge');
+
+  // Banner bloqueado
+  if (banner)   banner.style.display   = (!isOpen && session.role !== 'instructor') ? '' : 'none';
+  // Input deshabilitado si cerrado (para no-instructor)
+  if (inputRow) {
+    const inp  = document.getElementById('chat-input');
+    const btn  = inputRow.querySelector('.chat-send');
+    const lock = !isOpen && session.role !== 'instructor';
+    if (inp) { inp.disabled = lock; inp.placeholder = lock ? '🔒 Chat cerrado por el instructor' : 'Escribe un mensaje…'; }
+    if (btn) btn.disabled = lock;
+  }
+  // Badge de estado
+  if (badge) {
+    badge.textContent = isOpen ? 'Abierto' : 'Cerrado';
+    badge.className   = `chat-status-badge ${isOpen ? 'open' : 'closed'}`;
+  }
+  // Botones del instructor
+  const btnToggle     = document.getElementById('btn-toggle-chat');
+  const btnInstToggle = document.getElementById('btn-inst-toggle-chat');
+  const label = isOpen ? '🔒 Cerrar Chat' : '🔓 Abrir Chat';
+  if (btnToggle)     btnToggle.textContent     = label;
+  if (btnInstToggle) btnInstToggle.textContent = label;
+
+  // Controles del instructor en el chat
+  const instCtrl = document.getElementById('inst-chat-controls');
+  if (instCtrl) instCtrl.style.display = session.role === 'instructor' ? 'flex' : 'none';
+}
+
+/* ──────────────────────────────────────────────────────────
+   CHAT — NAVEGACIÓN Y RENDER
 ────────────────────────────────────────────────────────── */
 function goToChat() {
-  // Recordar de dónde venimos
   const active = document.querySelector('.screen.active');
   if (active && active.id !== 's-chat') prevScreen = active.id;
   renderChatBadge();
   renderChatMsgs();
+  renderChatLockUI();
   goTo('s-chat');
 }
 
@@ -1367,15 +1528,31 @@ function renderChatBadge() {
 
 function setChatTab(tab) {
   chatTab = tab;
-  document.getElementById('tab-general').classList.toggle('active', tab === 'general');
-  document.getElementById('tab-tribe').classList.toggle('active',   tab === 'tribe');
-  renderChatMsgs();
+  document.getElementById('tab-general').classList.toggle('active',   tab === 'general');
+  document.getElementById('tab-tribe').classList.toggle('active',     tab === 'tribe');
+  const botTab = document.getElementById('tab-bot');
+  if (botTab) botTab.classList.toggle('active', tab === 'bot');
+
+  // Mostrar panel correcto
+  const chatMsgs   = document.getElementById('chat-msgs');
+  const botMsgs    = document.getElementById('bot-msgs');
+  const chatInput  = document.getElementById('chat-input-row');
+  const botInput   = document.getElementById('bot-input-row');
+
+  if (chatMsgs)  chatMsgs.style.display  = tab === 'bot' ? 'none' : '';
+  if (botMsgs)   botMsgs.style.display   = tab === 'bot' ? '' : 'none';
+  if (chatInput) chatInput.style.display = tab === 'bot' ? 'none' : '';
+  if (botInput)  botInput.style.display  = tab === 'bot' ? '' : 'none';
+
+  if (tab !== 'bot') renderChatMsgs();
+  else renderBotMsgs();
+  renderChatLockUI();
 }
 
 function renderChatMsgs() {
   const container = document.getElementById('chat-msgs');
   if (!container) return;
-  const all = DB.chat || [];
+  const all  = DB.chat || [];
   const msgs = chatTab === 'tribe'
     ? all.filter(m => m.system || m.tribeId === session.tribeId)
     : all;
@@ -1397,13 +1574,19 @@ function renderChatMsgs() {
     </div>`;
   }).join('');
   container.scrollTop = container.scrollHeight;
+  renderChatLockUI();
 }
 
 function sendChatMsg() {
+  const isOpen = DB.chatOpen !== false;
+  if (!isOpen && session.role !== 'instructor') {
+    showToast('🔒 El chat está cerrado', 'warning'); return;
+  }
   const inp = document.getElementById('chat-input');
-  const txt = inp?.value.trim();
-  if (!txt) return;
+  const raw = inp?.value.trim();
+  if (!raw) return;
   inp.value = '';
+  const txt = filterProfanity(raw);
   updateDB(d => {
     if (!d.chat) d.chat = [];
     d.chat.push({
@@ -1424,6 +1607,97 @@ function postSystemMsg(text) {
     if (!d.chat) d.chat = [];
     d.chat.push({ id: Date.now(), author: 'Sistema', tribeId: null, tab: 'general', text, ts: Date.now(), system: true });
   });
+}
+
+/* ──────────────────────────────────────────────────────────
+   CHATBOT ESTRATEGA IA (Anthropic API)
+────────────────────────────────────────────────────────── */
+let botHistory   = [];   // historial local de mensajes con el bot
+let botThinking  = false;
+
+function renderBotMsgs() {
+  const container = document.getElementById('bot-msgs');
+  if (!container) return;
+  if (botHistory.length === 0) {
+    container.innerHTML = `
+      <div style="text-align:center;padding:24px 16px;color:var(--gray)">
+        <div style="font-size:2.5rem;margin-bottom:10px">🤖</div>
+        <div style="font-family:var(--fh);font-size:1rem;color:var(--gold);margin-bottom:8px">Estratega IA</div>
+        <div style="font-size:.82rem;line-height:1.5">Soy tu consejero estratégico.<br>Pregúntame sobre negociaciones,<br>cuándo traicionar o cuándo confiar.</div>
+      </div>`;
+    return;
+  }
+  container.innerHTML = botHistory.map(m => {
+    const isUser = m.role === 'user';
+    return `<div class="bot-bubble-wrap ${isUser ? 'user-side' : 'bot-side'}">
+      <div class="bot-meta">${isUser ? (session.name || 'Tú') : '🤖 Estratega'}</div>
+      <div class="bot-bubble">${esc(m.content)}</div>
+    </div>`;
+  }).join('');
+  if (botThinking) {
+    container.innerHTML += `<div class="bot-bubble-wrap bot-side">
+      <div class="bot-meta">🤖 Estratega</div>
+      <div class="bot-bubble"><div class="bot-thinking">
+        <div class="bot-dot"></div><div class="bot-dot"></div><div class="bot-dot"></div>
+      </div></div>
+    </div>`;
+  }
+  container.scrollTop = container.scrollHeight;
+}
+
+async function sendBotMsg() {
+  if (botThinking) return;
+  const inp = document.getElementById('bot-input');
+  const raw = inp?.value.trim();
+  if (!raw) return;
+  inp.value = '';
+
+  const txt = filterProfanity(raw);
+  botHistory.push({ role: 'user', content: txt });
+  botThinking = true;
+  renderBotMsgs();
+
+  // Construir contexto del juego para el bot
+  const t    = DB.tribes?.[session.tribeId];
+  const myDeals = (DB.deals || []).filter(x => x.fromId === session.tribeId || x.toId === session.tribeId);
+  const gameCtx = t ? `
+Contexto actual del juego:
+- Mi tribu: ${t.name} ${t.emoji}
+- Recursos: ${t.water} agua, ${t.food} comida, ${t.medicine} medicina
+- Reputación: ${t.reputation}/200
+- Ronda: ${DB.round}/${5}
+- Acuerdos míos: ${myDeals.length} (${myDeals.filter(d=>d.status==='fulfilled').length} cumplidos, ${myDeals.filter(d=>d.status==='broken').length} traicionados)
+- Evento de la ronda: ${DB.currentEvent?.text || '—'}
+` : 'El juego aún no ha comenzado.';
+
+  const systemPrompt = `Eres el Estratega IA del juego educativo "La Isla de los Acuerdos", un simulador de negociación y dilema del prisionero para estudiantes.
+El juego tiene 6 tribus que deben negociar recursos (agua, comida, medicina) durante 5 rondas.
+Cada ronda las tribus pueden cumplir o traicionar sus acuerdos: cumplir da +15 reputación, traicionar da -25.
+Los puntos finales = suma de recursos + reputación/2.
+
+${gameCtx}
+
+Tu rol: dar consejos estratégicos cortos, prácticos y divertidos. Responde en español. Máximo 3 oraciones. Sé directo y usa emojis ocasionalmente. No des discursos largos.`;
+
+  try {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 300,
+        system: systemPrompt,
+        messages: botHistory.map(m => ({ role: m.role, content: m.content }))
+      })
+    });
+    const data = await resp.json();
+    const reply = data.content?.[0]?.text || 'No pude responder en este momento.';
+    botHistory.push({ role: 'assistant', content: reply });
+  } catch(err) {
+    botHistory.push({ role: 'assistant', content: '⚠️ Sin conexión con el Estratega ahora mismo. Intenta de nuevo.' });
+  }
+  botThinking = false;
+  renderBotMsgs();
 }
 
 /* ──────────────────────────────────────────────────────────
