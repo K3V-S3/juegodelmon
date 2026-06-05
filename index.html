@@ -802,6 +802,7 @@ let DB = freshState();
 let _roomCode    = null;   // código de sala activo
 let _fbListener  = null;   // referencia al listener activo para poder detenerlo
 let _fbReady     = false;
+let _inChat      = false;  // true mientras el usuario está en la pantalla de chat
 
 function _roomRef() {
   if (!_roomCode || !window._fbDB) return null;
@@ -823,8 +824,8 @@ function _attachListener(code) {
     if (!data) return;
     DB = data;
     renderAll();
-    // Solo navegar automáticamente si NO estamos en el chat
-    if (!isActive('s-chat')) {
+    // Nunca navegar si el usuario está en el chat
+    if (!_inChat) {
       if (data.phase === 'playing' && session.role !== 'instructor') autoNavigate(data);
       if (data.phase === 'final') goTo('s-final');
     }
@@ -1085,25 +1086,39 @@ function renderLobby(d) {
   if (btn) btn.textContent = d.phase === 'playing' ? '🔄 Siguiente Ronda' : '▶ Iniciar Ronda 1';
 
   // Auto-navegar si el juego ya empezó
-  if (d.phase === 'playing') autoNavigate(d);
-  if (d.phase === 'final')   goTo('s-final');
+  if (!_inChat) {
+    if (d.phase === 'playing') autoNavigate(d);
+    if (d.phase === 'final')   goTo('s-final');
+  }
 }
 
 /* ──────────────────────────────────────────────────────────
-   TIMER
+   TIMER — solo el instructor corre el timer localmente
+   NO escribe en Firebase cada segundo (evita loop)
 ────────────────────────────────────────────────────────── */
 function startTimer() {
   clearInterval(timerInterval);
   timerInterval = setInterval(() => {
     const d = loadDB();
-    if (!d.timerRunning) return;
+    if (!d.timerRunning) { clearInterval(timerInterval); timerInterval = null; return; }
     if (d.timerSec <= 0) {
       clearInterval(timerInterval);
-      updateDB(dd => { dd.timerRunning = false; });
+      timerInterval = null;
+      // Solo el instructor escribe el fin del timer en Firebase
+      if (session.role === 'instructor') {
+        updateDB(dd => { dd.timerRunning = false; dd.timerSec = 0; });
+      }
       showToast('⏰ ¡Tiempo! La ronda ha terminado.', 'warning');
       return;
     }
-    updateDB(dd => { dd.timerSec = Math.max(0, dd.timerSec - 1); });
+    // Decrementar solo localmente para no inundar Firebase
+    DB.timerSec = Math.max(0, DB.timerSec - 1);
+    renderTimer(DB.timerSec);
+    // Cada 10 segundos sincronizar con Firebase (solo instructor)
+    if (session.role === 'instructor' && DB.timerSec % 10 === 0) {
+      const r = _roomRef();
+      if (r) r.child('timerSec').set(DB.timerSec).catch(()=>{});
+    }
   }, 1000);
 }
 
@@ -1160,7 +1175,7 @@ function instructorStartRound() {
 
   postSystemMsg(`🔔 Ronda ${d.round}/${MAX_ROUNDS} iniciada — ${ev.icon} ${ev.text}`);
   showToast(`▶ Ronda ${d.round} iniciada`, 'success');
-  goTo('s-instructor');
+  if (!isActive('s-chat')) goTo('s-instructor');
 }
 
 function applyEvent(d, ev) {
@@ -1397,7 +1412,7 @@ function renderAll() {
   renderTribeView(d);
   renderFinal(d);
   // Renderizar chat si está abierto (sin cambiar de pantalla)
-  if (isActive('s-chat')) {
+  if (_inChat) {
     if (chatTab === 'bot') renderBotMsgs();
     else renderChatMsgs();
     renderChatLockUI();
@@ -1504,6 +1519,7 @@ function renderChatLockUI() {
 function goToChat() {
   const active = document.querySelector('.screen.active');
   if (active && active.id !== 's-chat') prevScreen = active.id;
+  _inChat = true;
   renderChatBadge();
   renderChatMsgs();
   renderChatLockUI();
@@ -1511,6 +1527,7 @@ function goToChat() {
 }
 
 function goBackFromChat() {
+  _inChat = false;
   goTo(prevScreen);
   renderAll();
 }
