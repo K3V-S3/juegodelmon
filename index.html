@@ -869,7 +869,7 @@
 ────────────────────────────────────────────────────────── */
 const ROUND_SECS      = 180;
 const MAX_ROUNDS      = 5;
-const INSTRUCTOR_CODE = '1234';
+const INSTRUCTOR_CODE = '676767';
 
 const DEFAULT_TRIBES = [
   { name: 'Tribu Arrecife',   emoji: '🦈', color: '#1ab8d8' },
@@ -1786,7 +1786,14 @@ function renderBotMsgs() {
       <div class="bot-intro">
         <div class="bot-intro-icon">🤖</div>
         <div class="bot-intro-title">Estratega IA</div>
-        <div class="bot-intro-sub">Soy tu consejero estratégico.<br>Pregúntame sobre negociaciones,<br>cuándo traicionar o cuándo confiar.</div>
+        <div class="bot-intro-sub">Soy tu consejero estratégico en tiempo real.<br><br>
+          <strong style="color:var(--gold)">Puedes preguntarme:</strong><br>
+          • "¿Debo cumplir o traicionar este acuerdo?"<br>
+          • "¿Con qué tribu me conviene negociar?"<br>
+          • "¿Cómo voy en el juego?"<br>
+          • "¿Qué recursos me hacen falta?"<br>
+          • "¿Cómo afecta el evento actual mi estrategia?"
+        </div>
       </div>`;
     return;
   }
@@ -1820,47 +1827,160 @@ async function sendBotMsg() {
   botThinking = true;
   renderBotMsgs();
 
-  // Construir contexto del juego para el bot
-  const t    = DB.tribes?.[session.tribeId];
-  const myDeals = (DB.deals || []).filter(x => x.fromId === session.tribeId || x.toId === session.tribeId);
-  const gameCtx = t ? `
-Contexto actual del juego:
-- Mi tribu: ${t.name} ${t.emoji}
-- Recursos: ${t.water} agua, ${t.food} comida, ${t.medicine} medicina
-- Reputación: ${t.reputation}/200
-- Ronda: ${DB.round}/${5}
-- Acuerdos míos: ${myDeals.length} (${myDeals.filter(d=>d.status==='fulfilled').length} cumplidos, ${myDeals.filter(d=>d.status==='broken').length} traicionados)
-- Evento de la ronda: ${DB.currentEvent?.text || '—'}
-` : 'El juego aún no ha comenzado.';
+  // ── Contexto detallado del juego ──
+  const myTribe   = DB.tribes?.[session.tribeId];
+  const allTribes = DB.tribes || [];
+  const myDeals   = (DB.deals || []).filter(x => x.fromId === session.tribeId || x.toId === session.tribeId);
+  const roundDeals = myDeals.filter(d => d.round === DB.round);
+  const totalRes   = myTribe ? myTribe.water + myTribe.food + myTribe.medicine : 0;
+  const avgRes     = allTribes.length
+    ? Math.round(allTribes.reduce((s,t) => s + t.water + t.food + t.medicine, 0) / allTribes.length)
+    : 0;
 
-  const systemPrompt = `Eres el Estratega IA del juego educativo "La Isla de los Acuerdos", un simulador de negociación y dilema del prisionero para estudiantes.
-El juego tiene 6 tribus que deben negociar recursos (agua, comida, medicina) durante 5 rondas.
-Cada ronda las tribus pueden cumplir o traicionar sus acuerdos: cumplir da +15 reputación, traicionar da -25.
-Los puntos finales = suma de recursos + reputación/2.
+  // Resumen de otras tribus (reputación y recursos totales)
+  const otherTribes = allTribes
+    .filter((_, i) => i !== session.tribeId)
+    .map(t => `  • ${t.emoji} ${t.name}: ${t.water+t.food+t.medicine} recursos totales, rep ${t.reputation}`)
+    .join('\n');
+
+  // Estado de acuerdos activos
+  const pendingDeals = roundDeals.filter(d => d.status === 'pending');
+  const dealsSummary = pendingDeals.length
+    ? pendingDeals.map(d => {
+        const other = allTribes[d.fromId === session.tribeId ? d.toId : d.fromId];
+        const gives = d.fromId === session.tribeId
+          ? `entrego ${d.giveW}💧${d.giveF}🍞${d.giveM}💊, recibo ${d.recvW}💧${d.recvF}🍞${d.recvM}💊`
+          : `recibo ${d.giveW}💧${d.giveF}🍞${d.giveM}💊, entrego ${d.recvW}💧${d.recvF}🍞${d.recvM}💊`;
+        return `  • Acuerdo con ${other?.emoji} ${other?.name}: ${gives}`;
+      }).join('\n')
+    : '  Sin acuerdos pendientes esta ronda.';
+
+  // Diagnóstico automático de situación
+  let situacion = '';
+  if (myTribe) {
+    const escarso = myTribe.water < 5 || myTribe.food < 5 || myTribe.medicine < 5;
+    const repBaja = myTribe.reputation < 60;
+    const repAlta = myTribe.reputation > 150;
+    const ultimaRonda = DB.round >= MAX_ROUNDS;
+    const liderRec = allTribes.reduce((a,b) => (a.water+a.food+a.medicine) > (b.water+b.food+b.medicine) ? a : b);
+    const estoyLider = liderRec.id === session.tribeId;
+    if (escarso) situacion += ' ⚠️ Tienes recursos críticos.';
+    if (repBaja)  situacion += ' 📉 Tu reputación es baja — traicionar más te puede costar la partida.';
+    if (repAlta)  situacion += ' ✨ Tienes buena reputación — úsala para pedir mejores tratos.';
+    if (ultimaRonda) situacion += ' 🏁 Es la última ronda — maximiza puntos ahora.';
+    if (estoyLider) situacion += ' 🥇 Vas liderando en recursos.';
+    if (totalRes < avgRes * 0.7) situacion += ' 📊 Estás por debajo del promedio de recursos.';
+  }
+
+  const gameCtx = myTribe ? `
+=== ESTADO ACTUAL DEL JUEGO ===
+Mi tribu: ${myTribe.emoji} ${myTribe.name}
+Ronda: ${DB.round} de ${MAX_ROUNDS}
+Mis recursos: ${myTribe.water}💧 agua | ${myTribe.food}🍞 comida | ${myTribe.medicine}💊 medicina (total: ${totalRes})
+Promedio del resto: ${avgRes} recursos por tribu
+Reputación: ${myTribe.reputation}/200
+Evento activo: ${DB.currentEvent?.icon || ''} ${DB.currentEvent?.text || '—'}
+Histórico: ${myDeals.filter(d=>d.status==='fulfilled').length} acuerdos cumplidos, ${myDeals.filter(d=>d.status==='broken').length} traicionados
+
+Otras tribus:
+${otherTribes}
+
+Acuerdos pendientes esta ronda:
+${dealsSummary}
+
+Diagnóstico automático:${situacion || ' Sin alertas críticas.'}
+` : 'El juego aún no ha comenzado o no estás en una tribu.';
+
+  const systemPrompt = `Eres el ESTRATEGA IA del juego educativo "La Isla de los Acuerdos". Eres un consejero de supervivencia astuto, directo y un poco dramático.
+
+REGLAS DEL JUEGO:
+- 6 tribus negocian recursos (agua💧, comida🍞, medicina💊) durante 5 rondas.
+- Cada ronda: cumplir acuerdos da +15 reputación por acuerdo, traicionar da -25 rep.
+- Puntos finales = total de recursos + reputación/2.
+- Eventos cada ronda afectan a todas las tribus.
+- Ganar requiere equilibrio: recursos Y reputación importan.
 
 ${gameCtx}
 
-Tu rol: dar consejos estratégicos cortos, prácticos y divertidos. Responde en español. Máximo 3 oraciones. Sé directo y usa emojis ocasionalmente. No des discursos largos.`;
+TU ESTILO:
+- Responde SIEMPRE en español.
+- Máximo 3-4 oraciones. Sé conciso y directo.
+- Analiza la situación real del jugador (usa los datos del contexto).
+- Da consejos específicos y accionables, no genéricos.
+- Usa emojis estratégicamente (no en cada palabra).
+- Si el jugador tiene recursos bajos de algo específico, díselo.
+- Si debe traicionar o cumplir esta ronda, analiza los pros y contras.
+- Si hay un evento activo, menciona cómo afecta la estrategia.
+- Varía tus respuestas; no repitas siempre lo mismo.
+- Puedes ser un poco sarcástico o dramático para hacer el juego más divertido.`;
 
   try {
     const resp = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 300,
-        system: systemPrompt,
-        messages: botHistory.map(m => ({ role: m.role, content: m.content }))
+        model:      'claude-sonnet-4-20250514',
+        max_tokens: 350,
+        system:     systemPrompt,
+        messages:   botHistory.map(m => ({ role: m.role, content: m.content }))
       })
     });
-    const data = await resp.json();
-    const reply = data.content?.[0]?.text || 'No pude responder en este momento.';
+
+    if (!resp.ok) {
+      const errData = await resp.json().catch(() => ({}));
+      throw new Error(errData.error?.message || `HTTP ${resp.status}`);
+    }
+
+    const data  = await resp.json();
+    const reply = data.content?.[0]?.text?.trim() || '🤔 No pude formular un consejo. Intenta de nuevo.';
     botHistory.push({ role: 'assistant', content: reply });
+
   } catch(err) {
-    botHistory.push({ role: 'assistant', content: '⚠️ Sin conexión con el Estratega ahora mismo. Intenta de nuevo.' });
+    console.error('Bot error:', err);
+    // Fallback: consejos locales según el estado del juego
+    const fallback = generateLocalAdvice();
+    botHistory.push({ role: 'assistant', content: fallback });
   }
+
   botThinking = false;
   renderBotMsgs();
+}
+
+/** Genera consejo local cuando la API no está disponible */
+function generateLocalAdvice() {
+  const t = DB.tribes?.[session.tribeId];
+  if (!t) return '🏝️ Primero únete a una tribu para recibir consejos estratégicos.';
+
+  const ronda = DB.round;
+  const myDeals = (DB.deals || []).filter(x => x.fromId === session.tribeId || x.toId === session.tribeId);
+  const traiciones = myDeals.filter(d => d.status === 'broken').length;
+
+  const tips = [];
+
+  // Basado en recursos
+  if (t.water < 5)    tips.push(`💧 ¡Agua crítica (${t.water})! Negocia agua urgentemente o no sobrevivirás.`);
+  if (t.food < 5)     tips.push(`🍞 Sin comida (${t.food}) tu tribu se debilitará. Busca un acuerdo alimentario.`);
+  if (t.medicine < 5) tips.push(`💊 Medicina escasa (${t.medicine}). Si llega una epidemia, estarás perdido.`);
+
+  // Basado en reputación
+  if (t.reputation < 50)  tips.push(`📉 Reputación ${t.reputation}/200 — Estás en zona de peligro. Cumple los próximos acuerdos sin falta.`);
+  if (t.reputation > 160) tips.push(`⭐ Reputación ${t.reputation}/200 — Excelente. Úsala para exigir mejores tratos en las negociaciones.`);
+
+  // Basado en ronda
+  if (ronda >= 4) tips.push(`🏁 Ronda ${ronda}/5 — Quedan pocas rondas. Calcula: recursos actuales + reputación/2 = tus puntos.`);
+  if (ronda === 1) tips.push(`🚀 Ronda 1 — Es temprano. Construye alianzas y CUMPLE para ganar reputación.`);
+
+  // Basado en traiciones
+  if (traiciones > 2) tips.push(`💀 Has traicionado ${traiciones} veces. Las otras tribus ya desconfían de ti — cambia de estrategia.`);
+  if (traiciones === 0 && myDeals.length > 1) tips.push(`🤝 Historial impecable. Las otras tribus confían en ti — aprovéchalo para pedir más.`);
+
+  // Evento activo
+  const ev = DB.currentEvent?.text;
+  if (ev) tips.push(`🌍 Evento: "${ev}" — Ajusta tu estrategia según esto.`);
+
+  if (tips.length === 0) tips.push(`🧠 Situación estable. Mantén alianzas con las tribus más fuertes y conserva recursos para la última ronda.`);
+
+  return tips[Math.floor(Math.random() * Math.min(tips.length, 2))];
 }
 
 /* ──────────────────────────────────────────────────────────
